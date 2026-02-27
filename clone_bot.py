@@ -16,56 +16,63 @@ if not BOT_TOKEN:
     exit(1)
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """处理所有转发的消息（兼容新版 python-telegram-bot）"""
     message = update.message
     if not message:
         return
 
-    # 判断是否为转发消息（新版本推荐使用 forward_origin）
-    is_forward = False
+    # 调试：打印整个消息对象的结构（可选，但可能太冗长，先用 INFO 打印关键字段）
+    logger.info(f"收到消息，是否有转发来源: {hasattr(message, 'forward_origin') and message.forward_origin}")
+
+    original_chat_id = None
+    original_message_id = None
+
+    # 新版：尝试通过 forward_origin 获取
     if hasattr(message, 'forward_origin') and message.forward_origin:
-        is_forward = True
-    elif hasattr(message, 'forward_date') and message.forward_date:  # 兼容旧版
-        is_forward = True
-
-    if not is_forward:
-        return
-
-    try:
-        # 获取原始消息的 chat_id 和 message_id（兼容新旧版）
-        original_chat_id = None
-        original_message_id = None
-
-        # 新版方式：通过 forward_origin
-        if hasattr(message, 'forward_origin') and message.forward_origin:
-            origin = message.forward_origin
+        origin = message.forward_origin
+        logger.info(f"forward_origin 类型: {origin.type}, 原始对象: {origin}")
+        try:
             if origin.type == 'chat':
+                # 来自频道或群组
                 original_chat_id = origin.chat.id
                 original_message_id = origin.message_id
+                logger.info(f"来自 chat: chat_id={original_chat_id}, msg_id={original_message_id}")
             elif origin.type == 'user':
+                # 来自用户
                 original_chat_id = origin.sender_user.id
                 original_message_id = origin.message_id
-            # 其他类型（如匿名管理员）暂不处理
+                logger.info(f"来自 user: user_id={original_chat_id}, msg_id={original_message_id}")
+            elif origin.type == 'hidden_user':
+                # 匿名转发（例如频道里匿名管理员），无法获取原始消息ID，无法复制
+                logger.info("收到匿名转发消息，无法复制")
+                return
+            else:
+                logger.warning(f"未知的 forward_origin 类型: {origin.type}")
+                return
+        except Exception as e:
+            logger.error(f"处理 forward_origin 时出错: {e}")
+            return
 
-        # 旧版方式：通过 forward_from_chat / forward_from
-        elif hasattr(message, 'forward_from_chat') and message.forward_from_chat:
+    # 旧版兼容（如果新版没取到，且存在旧版属性）
+    if not original_chat_id:
+        if hasattr(message, 'forward_from_chat') and message.forward_from_chat:
             original_chat_id = message.forward_from_chat.id
             original_message_id = message.forward_from_message_id
+            logger.info(f"使用旧版 forward_from_chat: chat_id={original_chat_id}, msg_id={original_message_id}")
         elif hasattr(message, 'forward_from') and message.forward_from:
             original_chat_id = message.forward_from.id
             original_message_id = message.forward_from_message_id
+            logger.info(f"使用旧版 forward_from: user_id={original_chat_id}, msg_id={original_message_id}")
 
-        if not original_chat_id or not original_message_id:
-            logger.warning("无法获取转发来源信息")
-            return
+    if not original_chat_id or not original_message_id:
+        logger.warning("无法获取转发来源信息")
+        return
 
-        # 在同一个群组里复制消息
+    try:
         await message.chat.copy_message(
             from_chat_id=original_chat_id,
             message_id=original_message_id
         )
         logger.info(f"已复制消息 {original_message_id} 到群 {message.chat.id}")
-
     except Exception as e:
         logger.error(f"复制失败: {e}")
 
