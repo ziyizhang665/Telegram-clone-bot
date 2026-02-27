@@ -22,7 +22,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not message:
         return
 
-    # 调试：打印是否包含转发来源信息
     logger.info(f"收到消息，是否有转发来源: {hasattr(message, 'forward_origin') and message.forward_origin}")
 
     original_chat_id = None
@@ -33,23 +32,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         origin = message.forward_origin
         logger.info(f"forward_origin 类型: {origin.type}, 原始对象: {origin}")
         try:
-            if origin.type == 'chat':
-                # 来自群组
+            if origin.type in ('chat', 'channel'):
                 original_chat_id = origin.chat.id
                 original_message_id = origin.message_id
-                logger.info(f"来自 chat: chat_id={original_chat_id}, msg_id={original_message_id}")
-            elif origin.type == 'channel':
-                # 来自频道
-                original_chat_id = origin.chat.id
-                original_message_id = origin.message_id
-                logger.info(f"来自 channel: chat_id={original_chat_id}, msg_id={original_message_id}")
+                logger.info(f"来自 {origin.type}: chat_id={original_chat_id}, msg_id={original_message_id}")
             elif origin.type == 'user':
-                # 来自用户
                 original_chat_id = origin.sender_user.id
                 original_message_id = origin.message_id
                 logger.info(f"来自 user: user_id={original_chat_id}, msg_id={original_message_id}")
             elif origin.type == 'hidden_user':
-                # 匿名转发（无法获取原始消息ID，无法复制）
                 logger.info("收到匿名转发消息，无法复制")
                 return
             else:
@@ -75,11 +66,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     try:
-        # 在同一个群组里复制消息
-        await message.chat.copy_message(
-            from_chat_id=original_chat_id,
-            message_id=original_message_id
-        )
+        # 关键修正：将 from_chat_id 作为位置参数传递，而不是关键字参数
+        await message.chat.copy_message(original_chat_id, original_message_id)
         logger.info(f"已复制消息 {original_message_id} 到群 {message.chat.id}")
     except Exception as e:
         logger.error(f"复制失败: {e}")
