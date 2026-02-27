@@ -10,39 +10,46 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# 从环境变量读取机器人 Token（在 Railway 的 Variables 中设置）
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 if not BOT_TOKEN:
     logger.error("BOT_TOKEN 环境变量未设置！")
     exit(1)
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """处理所有转发的消息（兼容新版 python-telegram-bot）"""
     message = update.message
     if not message:
         return
 
-    # 调试：打印整个消息对象的结构（可选，但可能太冗长，先用 INFO 打印关键字段）
+    # 调试：打印是否包含转发来源信息
     logger.info(f"收到消息，是否有转发来源: {hasattr(message, 'forward_origin') and message.forward_origin}")
 
     original_chat_id = None
     original_message_id = None
 
-    # 新版：尝试通过 forward_origin 获取
+    # 新版：通过 forward_origin 获取转发来源
     if hasattr(message, 'forward_origin') and message.forward_origin:
         origin = message.forward_origin
         logger.info(f"forward_origin 类型: {origin.type}, 原始对象: {origin}")
         try:
             if origin.type == 'chat':
-                # 来自频道或群组
+                # 来自群组
                 original_chat_id = origin.chat.id
                 original_message_id = origin.message_id
                 logger.info(f"来自 chat: chat_id={original_chat_id}, msg_id={original_message_id}")
+            elif origin.type == 'channel':
+                # 来自频道
+                original_chat_id = origin.chat.id
+                original_message_id = origin.message_id
+                logger.info(f"来自 channel: chat_id={original_chat_id}, msg_id={original_message_id}")
             elif origin.type == 'user':
                 # 来自用户
                 original_chat_id = origin.sender_user.id
                 original_message_id = origin.message_id
                 logger.info(f"来自 user: user_id={original_chat_id}, msg_id={original_message_id}")
             elif origin.type == 'hidden_user':
-                # 匿名转发（例如频道里匿名管理员），无法获取原始消息ID，无法复制
+                # 匿名转发（无法获取原始消息ID，无法复制）
                 logger.info("收到匿名转发消息，无法复制")
                 return
             else:
@@ -68,6 +75,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     try:
+        # 在同一个群组里复制消息
         await message.chat.copy_message(
             from_chat_id=original_chat_id,
             message_id=original_message_id
@@ -85,8 +93,11 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 def main():
+    """主函数：启动机器人"""
     app = Application.builder().token(BOT_TOKEN).build()
+    # 添加 /start 命令处理器
     app.add_handler(MessageHandler(filters.COMMAND & filters.Regex('^/start$'), start_command))
+    # 添加所有非命令消息的处理器
     app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, handle_message))
     logger.info("机器人启动中...")
     app.run_polling()
